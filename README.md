@@ -229,12 +229,12 @@ See [LICENSE](LICENSE)
 
 Special thanks to the following contributors:
 
-| Contributor | Contribution | Contact |
-|:---:|:---|:---:|
-| **等不住** | AT Commands | QQ: 3066618313 |
-| **黑衣剑士** | USB Mode Switch | QQ: 2079853997 |
-| **Voodoo** | Glib Build Environment | QQ: 2079853997 |
-| **LeoChen** | Project Author | QQ: 1708636545 |
+| Contributor | Contribution |
+|:---:|:---|
+| **等不住** | AT Commands |
+| **黑衣剑士** | USB Mode Switch |
+| **Voodoo** | Glib Build Environment |
+| **LeoChen** | Project Author |
 
 Thanks to all community members for your support and feedback!
 
