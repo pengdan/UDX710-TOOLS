@@ -155,7 +155,29 @@ import {
   // WebTerminal.vue
   faExternalLinkAlt,
   faExpand,
-  faCompress
+  faCompress,
+  
+  // NetworkManager.vue 漫游图标
+  faGlobe,
+  
+  // PluginStore.vue 插件商城
+  faPuzzlePiece,
+  faPlus,
+  faDownload,
+  faUpload,
+  faTrashAlt,
+  faFileCode,
+  faFileExport,
+  faFileImport,
+  faBook,
+  faEdit,
+  faToolbox,
+  faFolder,
+  faDatabase,
+  faSearch,
+  
+  // ApnConfig.vue 运营商图标
+  faMobileAlt
 } from '@fortawesome/free-solid-svg-icons'
 
 // 注册所有图标到库
@@ -272,7 +294,23 @@ library.add(
   faExternalLinkAlt,
   faExpand,
   faCompress,
-  faUsb
+  faUsb,
+  faGlobe,
+  faPuzzlePiece,
+  faPlus,
+  faDownload,
+  faUpload,
+  faTrashAlt,
+  faFileCode,
+  faFileExport,
+  faFileImport,
+  faBook,
+  faEdit,
+  faToolbox,
+  faFolder,
+  faDatabase,
+  faSearch,
+  faMobileAlt
 )
 
 // 启用 DOM 监视器，自动将 <i class="fas fa-xxx"> 转换为 SVG

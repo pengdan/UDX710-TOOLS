@@ -1,6 +1,6 @@
 <script setup>
-import { inject, ref, watch } from 'vue'
-import { toggleAirplaneMode, setNetworkMode, switchSlot } from '../composables/useApi'
+import { inject, ref, watch, onMounted } from 'vue'
+import { toggleAirplaneMode, setNetworkMode, switchSlot, getDataStatus, setDataStatus, getRoamingStatus, setRoamingAllowed } from '../composables/useApi'
 import { useToast } from '../composables/useToast'
 
 const { success, error } = useToast()
@@ -11,6 +11,13 @@ const airplaneMode = ref(false)
 const selectedNetworkMode = ref('')
 const currentSlot = ref('slot1')
 const saving = ref(false)
+
+// 数据连接和漫游状态
+const dataActive = ref(false)
+const dataLoading = ref(false)
+const roamingAllowed = ref(false)
+const isRoaming = ref(false)
+const roamingLoading = ref(false)
 
 const networkModes = [
   { value: 'nr_5g_lte_auto', label: '5G/LTE Auto', icon: 'fa-a', desc: '自动切换' },
@@ -65,6 +72,78 @@ async function handleSlotSwitch(slot) {
   }
 }
 
+// 获取数据连接状态
+async function fetchDataStatus() {
+  try {
+    const res = await getDataStatus()
+    if (res.status === 'ok' && res.data) {
+      dataActive.value = res.data.active
+    }
+  } catch (err) {
+    console.error('获取数据连接状态失败:', err)
+  }
+}
+
+// 切换数据连接
+async function handleDataToggle() {
+  dataLoading.value = true
+  try {
+    const res = await setDataStatus(dataActive.value)
+    if (res.status === 'ok') {
+      success(dataActive.value ? '数据连接已开启' : '数据连接已关闭')
+    } else {
+      dataActive.value = !dataActive.value
+      error(res.message || '操作失败')
+    }
+  } catch (err) {
+    dataActive.value = !dataActive.value
+    error('切换失败: ' + err.message)
+  } finally {
+    dataLoading.value = false
+  }
+}
+
+// 获取漫游状态
+async function fetchRoamingStatus() {
+  try {
+    const res = await getRoamingStatus()
+    if (res.status === 'ok' && res.data) {
+      roamingAllowed.value = res.data.roaming_allowed
+      isRoaming.value = res.data.is_roaming
+    }
+  } catch (err) {
+    console.error('获取漫游状态失败:', err)
+  }
+}
+
+// 切换漫游开关
+async function handleRoamingToggle() {
+  roamingLoading.value = true
+  try {
+    const res = await setRoamingAllowed(roamingAllowed.value)
+    if (res.status === 'ok') {
+      if (res.data) {
+        isRoaming.value = res.data.is_roaming
+      }
+      success(roamingAllowed.value ? '漫游已开启' : '漫游已关闭')
+    } else {
+      roamingAllowed.value = !roamingAllowed.value
+      error(res.message || '操作失败')
+    }
+  } catch (err) {
+    roamingAllowed.value = !roamingAllowed.value
+    error('切换失败: ' + err.message)
+  } finally {
+    roamingLoading.value = false
+  }
+}
+
+// 初始化获取状态
+onMounted(() => {
+  fetchDataStatus()
+  fetchRoamingStatus()
+})
+
 </script>
 
 <template>
@@ -78,7 +157,7 @@ async function handleSlotSwitch(slot) {
         </h3>
         
         <!-- 飞行模式 -->
-        <div class="flex items-center justify-between p-4 bg-slate-100 dark:bg-white/5 rounded-xl mb-4">
+        <div class="flex items-center justify-between p-4 bg-slate-100 dark:bg-white/5 rounded-xl mb-3">
           <div class="flex items-center space-x-3">
             <div class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
               <i class="fas fa-plane text-blue-400"></i>
@@ -93,6 +172,47 @@ async function handleSlotSwitch(slot) {
             <div class="w-14 h-7 bg-slate-300 dark:bg-white/20 rounded-full peer peer-checked:bg-blue-500 transition-colors"></div>
             <div class="absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform peer-checked:translate-x-7"></div>
           </label>
+        </div>
+
+        <!-- 数据连接 -->
+        <div class="flex items-center justify-between p-4 bg-slate-100 dark:bg-white/5 rounded-xl mb-3">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
+              <i class="fas fa-signal text-green-400"></i>
+            </div>
+            <div>
+              <p class="text-slate-900 dark:text-white font-medium">数据连接</p>
+              <p class="text-slate-500 dark:text-white/50 text-sm">开启/关闭移动数据</p>
+            </div>
+          </div>
+          <label class="relative cursor-pointer" :class="{ 'opacity-50 pointer-events-none': dataLoading }">
+            <input type="checkbox" v-model="dataActive" @change="handleDataToggle" class="sr-only peer" :disabled="dataLoading">
+            <div class="w-14 h-7 bg-slate-300 dark:bg-white/20 rounded-full peer peer-checked:bg-green-500 transition-colors"></div>
+            <div class="absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform peer-checked:translate-x-7"></div>
+          </label>
+        </div>
+
+        <!-- 数据漫游 -->
+        <div class="flex items-center justify-between p-4 bg-slate-100 dark:bg-white/5 rounded-xl mb-4">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
+              <i class="fas fa-globe text-orange-400"></i>
+            </div>
+            <div>
+              <p class="text-slate-900 dark:text-white font-medium">数据漫游</p>
+              <p class="text-slate-500 dark:text-white/50 text-sm">
+                {{ roamingAllowed ? '漫游开关: 已开启' : '漫游开关: 已关闭' }}
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span v-if="isRoaming" class="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs rounded-full">漫游中</span>
+            <label class="relative cursor-pointer" :class="{ 'opacity-50 pointer-events-none': roamingLoading }">
+              <input type="checkbox" v-model="roamingAllowed" @change="handleRoamingToggle" class="sr-only peer" :disabled="roamingLoading">
+              <div class="w-14 h-7 bg-slate-300 dark:bg-white/20 rounded-full peer peer-checked:bg-orange-500 transition-colors"></div>
+              <div class="absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform peer-checked:translate-x-7"></div>
+            </label>
+          </div>
         </div>
 
         <!-- 网络模式选择 -->

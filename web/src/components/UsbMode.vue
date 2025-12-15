@@ -1,6 +1,6 @@
 <script setup>
-import { ref } from 'vue'
-import { setUsbMode, deviceControl } from '../composables/useApi'
+import { ref, onMounted } from 'vue'
+import { getUsbMode, setUsbMode, usbAdvanceSwitch, deviceControl } from '../composables/useApi'
 import { useToast } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
 
@@ -8,6 +8,81 @@ const { success, error } = useToast()
 const { confirm } = useConfirm()
 
 const loading = ref(null) // 当前加载的按钮标识
+const currentMode = ref(null) // 当前硬件模式
+const currentModeName = ref('') // 当前模式名称
+const isTemporary = ref(false) // 是否临时模式
+const hotSwitching = ref(false) // 热切换中
+
+// 模式值到名称的映射
+const modeValueToName = {
+  1: 'CDC-NCM',
+  2: 'CDC-ECM', 
+  3: 'RNDIS'
+}
+
+const modeIdToValue = {
+  'cdc_ncm': 1,
+  'cdc_ecm': 2,
+  'rndis': 3
+}
+
+// 获取当前USB模式
+async function fetchCurrentMode() {
+  try {
+    const res = await getUsbMode()
+    if (res.Code === 0 && res.Data) {
+      const modeVal = res.Data.mode_value
+      currentMode.value = modeVal
+      // 处理无效模式值的情况
+      if (modeVal > 0 && modeValueToName[modeVal]) {
+        currentModeName.value = modeValueToName[modeVal]
+      } else {
+        currentModeName.value = '未知'
+      }
+      isTemporary.value = res.Data.is_temporary || false
+    } else {
+      currentModeName.value = '未知'
+    }
+  } catch (err) {
+    console.error('获取USB模式失败:', err)
+    currentModeName.value = '获取失败'
+  }
+}
+
+// 热切换USB模式
+async function handleHotSwitch(mode) {
+  const modeValue = modeIdToValue[mode.id]
+  if (!modeValue || hotSwitching.value) return
+  
+  const confirmed = await confirm({
+    title: '热切换确认',
+    message: `即将热切换到 ${mode.name} 模式，USB连接会短暂断开（约2秒），确定继续吗？`
+  })
+  if (!confirmed) return
+  
+  hotSwitching.value = true
+  loading.value = `${mode.id}_hot`
+  
+  try {
+    const res = await usbAdvanceSwitch(modeValue)
+    if (res.Code === 0) {
+      success(`已热切换到 ${mode.name} 模式`)
+      currentMode.value = modeValue
+      currentModeName.value = mode.name
+    } else {
+      throw new Error(res.Error || '热切换失败')
+    }
+  } catch (err) {
+    error('热切换失败: ' + err.message)
+  } finally {
+    hotSwitching.value = false
+    loading.value = null
+  }
+}
+
+onMounted(() => {
+  fetchCurrentMode()
+})
 
 const modes = [
   {
@@ -70,6 +145,9 @@ async function handleSwitch(mode, permanent) {
     if (res.Code === 0) {
       success(`${permanent ? '永久' : '临时'}切换到${mode.name}模式成功`)
       
+      // 重新获取当前模式状态
+      await fetchCurrentMode()
+      
       // 询问是否重启
       const reboot = await confirm({
         title: '重启设备',
@@ -92,16 +170,27 @@ async function handleSwitch(mode, permanent) {
 
 <template>
   <div class="space-y-6">
-    <!-- 标题卡片 -->
+    <!-- 标题卡片 + 当前模式显示 -->
     <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-50/80 via-purple-50/60 to-pink-50/40 dark:from-indigo-600/20 dark:via-purple-600/20 dark:to-pink-600/20 border border-slate-200/60 dark:border-white/10 p-6 shadow-xl">
       <div class="absolute top-0 right-0 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-      <div class="relative flex items-center space-x-4">
-        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/30">
-          <font-awesome-icon :icon="['fab', 'usb']" class="text-white text-2xl" />
+      <div class="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div class="flex items-center space-x-4">
+          <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/30">
+            <font-awesome-icon :icon="['fab', 'usb']" class="text-white text-2xl" />
+          </div>
+          <div>
+            <h2 class="text-slate-800 dark:text-white font-bold text-xl">USB模式切换</h2>
+            <p class="text-slate-600 dark:text-white/50 text-sm mt-1">选择适合您设备的USB网络模式</p>
+          </div>
         </div>
-        <div>
-          <h2 class="text-slate-800 dark:text-white font-bold text-xl">USB模式切换</h2>
-          <p class="text-slate-600 dark:text-white/50 text-sm mt-1">选择适合您设备的USB网络模式</p>
+        <!-- 当前模式状态 -->
+        <div v-if="currentModeName" class="flex items-center space-x-3 px-4 py-2 rounded-xl bg-white/60 dark:bg-white/10 border border-slate-200/60 dark:border-white/10">
+          <div class="w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
+          <div class="text-sm">
+            <span class="text-slate-500 dark:text-white/50">当前模式：</span>
+            <span class="font-semibold text-slate-800 dark:text-white">{{ currentModeName }}</span>
+            <span v-if="isTemporary" class="ml-2 px-2 py-0.5 text-xs bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-full">临时</span>
+          </div>
         </div>
       </div>
     </div>
@@ -135,6 +224,17 @@ async function handleSwitch(mode, permanent) {
           
           <!-- 按钮组 -->
           <div class="space-y-3">
+            <!-- 热切换按钮（立即生效） -->
+            <button
+              @click="handleHotSwitch(mode)"
+              :disabled="loading !== null || currentMode === modeIdToValue[mode.id]"
+              :class="`w-full py-3 px-4 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-medium text-sm shadow-lg shadow-violet-500/30 hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2`"
+            >
+              <font-awesome-icon v-if="loading === `${mode.id}_hot`" icon="spinner" spin />
+              <font-awesome-icon v-else icon="bolt" />
+              <span>热切换（立即生效）</span>
+            </button>
+            
             <!-- 临时切换按钮 -->
             <button
               @click="handleSwitch(mode, false)"
@@ -142,7 +242,7 @@ async function handleSwitch(mode, permanent) {
               :class="`w-full py-3 px-4 rounded-xl bg-gradient-to-r ${mode.btnTemp} text-white font-medium text-sm shadow-lg ${mode.shadow} hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2`"
             >
               <font-awesome-icon v-if="loading === `${mode.id}_temp`" icon="spinner" spin />
-              <span>切换到{{ mode.name }}模式（临时）</span>
+              <span>临时模式（重启生效）</span>
             </button>
             
             <!-- 永久切换按钮 -->
@@ -152,7 +252,7 @@ async function handleSwitch(mode, permanent) {
               :class="`w-full py-3 px-4 rounded-xl bg-gradient-to-r ${mode.btnPerm} text-white font-medium text-sm shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2`"
             >
               <font-awesome-icon v-if="loading === `${mode.id}_perm`" icon="spinner" spin />
-              <span>切换到{{ mode.name }}模式（永久）</span>
+              <span>永久模式（重启生效）</span>
             </button>
           </div>
         </div>
@@ -166,9 +266,9 @@ async function handleSwitch(mode, permanent) {
         <div class="text-sm text-amber-800 dark:text-amber-200">
           <p class="font-medium mb-1">注意事项</p>
           <ul class="list-disc list-inside space-y-1 text-amber-700 dark:text-amber-300/80">
-            <li>临时模式在设备重启后会恢复默认设置</li>
-            <li>永久模式会在下次重启后永久生效</li>
-            <li>切换模式后需要重启设备才能生效</li>
+            <li><span class="font-medium text-violet-600 dark:text-violet-400">热切换</span>：立即生效，USB连接会短暂断开约2秒</li>
+            <li><span class="font-medium">临时模式</span>：重启后生效，再次重启恢复默认</li>
+            <li><span class="font-medium">永久模式</span>：重启后永久生效</li>
           </ul>
         </div>
       </div>

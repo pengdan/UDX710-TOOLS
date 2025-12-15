@@ -11,6 +11,8 @@ import SystemUpdate from './components/SystemUpdate.vue'
 import ATDebug from './components/ATDebug.vue'
 import WebTerminal from './components/WebTerminal.vue'
 import UsbMode from './components/UsbMode.vue'
+import ApnConfig from './components/ApnConfig.vue'
+import PluginStore from './components/PluginStore.vue'
 import GlobalToast from './components/GlobalToast.vue'
 import GlobalConfirm from './components/GlobalConfirm.vue'
 
@@ -102,6 +104,7 @@ provide('loading', loading)
 const menuItems = [
   { id: 'monitor', label: '系统监控', icon: 'fa-tachometer-alt', color: 'from-blue-500 to-cyan-400' },
   { id: 'network', label: '网络管理', icon: 'fa-network-wired', color: 'from-purple-500 to-pink-400' },
+  { id: 'apn', label: 'APN配置', icon: 'fa-globe', color: 'from-teal-500 to-cyan-400' },
   { id: 'advanced', label: '高级网络', icon: 'fa-tower-cell', color: 'from-cyan-500 to-blue-500' },
   { id: 'sms', label: '短信管理', icon: 'fa-envelope', color: 'from-emerald-500 to-teal-400' },
   { id: 'traffic', label: '流量统计', icon: 'fa-chart-area', color: 'from-green-500 to-emerald-400' },
@@ -110,6 +113,7 @@ const menuItems = [
   { id: 'at', label: 'AT调试', icon: 'fa-terminal', color: 'from-cyan-500 to-teal-400' },
   { id: 'terminal', label: 'Web终端', icon: 'fa-desktop', color: 'from-slate-500 to-gray-400' },
   { id: 'usb', label: 'USB模式', icon: ['fab', 'usb'], color: 'from-purple-500 to-pink-400' },
+  { id: 'plugins', label: '插件商城', icon: 'fa-puzzle-piece', color: 'from-violet-500 to-purple-400' },
   { id: 'settings', label: '系统设置', icon: 'fa-sliders-h', color: 'from-orange-500 to-amber-400' }
 ]
 
@@ -188,13 +192,6 @@ onUnmounted(() => {
             class="w-full group relative overflow-hidden rounded-xl transition-all duration-300"
             :class="activeMenu === item.id ? 'bg-gradient-to-r from-blue-100/80 to-indigo-100/60 dark:from-white/20 dark:to-white/10 shadow-md shadow-blue-200/30 dark:shadow-black/10' : 'hover:bg-slate-100/80 dark:hover:bg-white/10'"
           >
-            <!-- 激活指示器 -->
-            <div 
-              v-if="activeMenu === item.id"
-              class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-r-full bg-gradient-to-b"
-              :class="item.color"
-            ></div>
-            
             <div class="flex items-center p-2 md:p-3" :class="(sidebarCollapsed && !isMobile) ? 'justify-center' : 'space-x-3'">
               <div 
                 class="w-9 h-9 md:w-10 md:h-10 rounded-lg flex items-center justify-center transition-all duration-300 flex-shrink-0"
@@ -317,6 +314,8 @@ onUnmounted(() => {
           <ATDebug v-else-if="activeMenu === 'at'" key="at" />
           <WebTerminal v-else-if="activeMenu === 'terminal'" key="terminal" />
           <UsbMode v-else-if="activeMenu === 'usb'" key="usb" />
+          <ApnConfig v-else-if="activeMenu === 'apn'" key="apn" />
+          <PluginStore v-else-if="activeMenu === 'plugins'" key="plugins" />
           <SystemSettings v-else-if="activeMenu === 'settings'" key="settings" />
         </Transition>
       </div>

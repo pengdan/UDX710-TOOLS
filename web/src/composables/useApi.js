@@ -130,6 +130,34 @@ export async function syncSystemTime() {
   return request('/api/set/time', { method: 'POST' })
 }
 
+// ==================== 数据连接和漫游API ====================
+
+// 获取数据连接状态
+export async function getDataStatus() {
+  return request('/api/data')
+}
+
+// 设置数据连接状态
+export async function setDataStatus(active) {
+  return request('/api/data', {
+    method: 'POST',
+    body: JSON.stringify({ active })
+  })
+}
+
+// 获取漫游状态
+export async function getRoamingStatus() {
+  return request('/api/roaming')
+}
+
+// 设置漫游允许状态
+export async function setRoamingAllowed(allowed) {
+  return request('/api/roaming', {
+    method: 'POST',
+    body: JSON.stringify({ allowed })
+  })
+}
+
 // ==================== 高级网络API ====================
 
 // 获取频段状态
@@ -229,6 +257,29 @@ export async function setUsbMode(mode, permanent = false) {
   })
 }
 
+// USB热切换（立即生效）
+export async function usbAdvanceSwitch(mode) {
+  return request('/api/usb-advance', {
+    method: 'POST',
+    body: JSON.stringify({ mode })
+  })
+}
+
+// ==================== APN配置API ====================
+
+// 获取APN列表
+export async function getApnList() {
+  return request('/api/apn')
+}
+
+// 设置APN配置
+export async function setApnConfig(config) {
+  return request('/api/apn', {
+    method: 'POST',
+    body: JSON.stringify(config)
+  })
+}
+
 // ==================== 通用API封装 ====================
 
 // 返回一个包含get/post方法的对象，用于组件中调用
@@ -244,4 +295,73 @@ export function useApi() {
       })
     }
   }
+}
+
+
+// ==================== 插件管理API ====================
+
+// 执行Shell命令
+export async function executeShell(command) {
+  return request('/api/shell', {
+    method: 'POST',
+    body: JSON.stringify({ command })
+  })
+}
+
+// 获取插件列表
+export async function getPluginList() {
+  return request('/api/plugins')
+}
+
+// 上传插件
+export async function uploadPlugin(name, content) {
+  return request('/api/plugins', {
+    method: 'POST',
+    body: JSON.stringify({ name, content })
+  })
+}
+
+// 删除指定插件
+export async function deletePlugin(name) {
+  return request(`/api/plugins/${encodeURIComponent(name)}`, {
+    method: 'DELETE'
+  })
+}
+
+// 删除所有插件
+export async function deleteAllPlugins() {
+  return request('/api/plugins/all', {
+    method: 'DELETE'
+  })
+}
+
+
+// ==================== 脚本管理API ====================
+
+// 获取脚本列表
+export async function getScriptList() {
+  return request('/api/scripts')
+}
+
+// 上传脚本
+export async function uploadScript(name, content) {
+  return request('/api/scripts', {
+    method: 'POST',
+    body: JSON.stringify({ name, content })
+  })
+}
+
+// 更新脚本
+export async function updateScript(name, content) {
+  return request(`/api/scripts/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ content })
+  })
+}
+
+// 删除脚本
+export async function deleteScript(name) {
+  return request(`/api/scripts/${encodeURIComponent(name)}`, {
+    method: 'DELETE'
+  })
 }
