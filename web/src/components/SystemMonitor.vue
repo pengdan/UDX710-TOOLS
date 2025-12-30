@@ -186,10 +186,9 @@ async function handleClearCache() {
             </div>
             <!-- 刷新按钮 -->
             <button @click="fetchCurrentBand" :disabled="bandLoading" 
-              class="group px-4 py-2 bg-white/80 dark:bg-white/10 backdrop-blur text-slate-700 dark:text-white/80 text-sm rounded-xl hover:bg-white dark:hover:bg-white/20 transition-all border border-slate-300 dark:border-white/10">
-              <font-awesome-icon v-if="bandLoading" icon="spinner" spin class="mr-2" />
-              <font-awesome-icon v-else icon="sync-alt" class="mr-2 group-hover:rotate-180 transition-transform duration-500" />
-              {{ t('common.refresh') }}
+              class="group px-3 py-2 bg-white/80 dark:bg-white/10 backdrop-blur text-slate-700 dark:text-white/80 text-sm rounded-xl hover:bg-white dark:hover:bg-white/20 transition-all border border-slate-300 dark:border-white/10">
+              <font-awesome-icon v-if="bandLoading" icon="spinner" spin />
+              <font-awesome-icon v-else icon="sync-alt" class="group-hover:rotate-180 transition-transform duration-500" />
             </button>
           </div>
         </div>

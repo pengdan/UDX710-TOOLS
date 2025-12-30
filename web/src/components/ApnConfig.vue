@@ -1,7 +1,6 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getApnList, setApnConfig } from '../composables/useApi'
 import { useToast } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
 
@@ -9,13 +8,21 @@ const { t } = useI18n()
 const { success, error } = useToast()
 const { confirm } = useConfirm()
 
+// 状态
 const loading = ref(false)
 const saving = ref(false)
-const contexts = ref([])
-const selectedContext = ref(null)
+const currentMode = ref(0) // 0=自动, 1=手动
+const autoStart = ref(0)
+const templates = ref([])
+const selectedTemplateId = ref(0)
+const showDialog = ref(false)
+const isEditing = ref(false)
+const currentTemplate = ref(null) // API返回的当前绑定模板（含应用状态）
 
-// 表单数据
+// 表单
 const form = ref({
+  id: 0,
+  name: '',
   apn: '',
   protocol: 'dual',
   username: '',
@@ -23,271 +30,502 @@ const form = ref({
   auth_method: 'chap'
 })
 
-// 协议选项
-const protocolOptions = computed(() => [
-  { value: 'ip', label: t('apn.ipv4') },
-  { value: 'ipv6', label: t('apn.ipv6') },
-  { value: 'dual', label: t('apn.dualStack') }
-])
+// 预设
+const presets = [
+  { name: '中国移动', apn: 'cmnet', color: 'bg-blue-500' },
+  { name: '中国联通', apn: '3gnet', color: 'bg-red-500' },
+  { name: '中国电信', apn: 'ctnet', color: 'bg-green-500' }
+]
 
-// 认证方式选项
-const authOptions = computed(() => [
-  { value: 'none', label: t('apn.noAuth') },
-  { value: 'pap', label: 'PAP' },
-  { value: 'chap', label: 'CHAP' }
-])
+// 计算属性
+const selectedTemplate = computed(() => 
+  templates.value.find(t => t.id === selectedTemplateId.value)
+)
 
-// 常用运营商配置
-const presets = computed(() => [
-  { name: t('apn.chinaMobile'), apn: 'cmnet', icon: 'mobile-alt', color: 'from-blue-500 to-cyan-500' },
-  { name: t('apn.chinaUnicom'), apn: '3gnet', icon: 'signal', color: 'from-red-500 to-orange-500' },
-  { name: t('apn.chinaTelecom'), apn: 'ctnet', icon: 'broadcast-tower', color: 'from-green-500 to-emerald-500' }
-])
+// API请求头
+function getHeaders(json = false) {
+  const token = localStorage.getItem('auth_token')
+  const headers = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (json) headers['Content-Type'] = 'application/json'
+  return headers
+}
 
-// 当前激活的 context
-const activeContext = computed(() => contexts.value.find(c => c.active))
-
-// 获取 APN 列表
-async function fetchApnList() {
-  loading.value = true
+// 获取配置
+async function fetchConfig() {
   try {
-    const res = await getApnList()
-    if (res.status === 'ok' && res.data?.contexts) {
-      contexts.value = res.data.contexts
-      // 默认选择第一个或激活的
-      if (contexts.value.length > 0) {
-        const active = contexts.value.find(c => c.active) || contexts.value[0]
-        selectContext(active)
-      }
+    const res = await fetch('/api/apn/config', { headers: getHeaders() })
+    if (!res.ok) return
+    const data = await res.json()
+    if (data.status === 'ok' && data.data) {
+      currentMode.value = data.data.mode || 0
+      selectedTemplateId.value = data.data.template_id || 0
+      autoStart.value = data.data.auto_start || 0
+      currentTemplate.value = data.data.template || null
     }
-  } catch (err) {
-    error(t('apn.getFailed') + ': ' + err.message)
-  } finally {
-    loading.value = false
+  } catch (e) {
+    console.error('获取配置失败:', e)
   }
 }
 
-// 选择 context
-function selectContext(ctx) {
-  selectedContext.value = ctx
-  form.value = {
-    apn: ctx.apn || '',
-    protocol: ctx.protocol || 'dual',
-    username: ctx.username || '',
-    password: ctx.password || '',
-    auth_method: ctx.auth_method || 'chap'
+// 获取模板列表
+async function fetchTemplates() {
+  try {
+    const res = await fetch('/api/apn/templates', { headers: getHeaders() })
+    if (!res.ok) return
+    const data = await res.json()
+    if (data.status === 'ok' && data.data) {
+      templates.value = data.data
+    }
+  } catch (e) {
+    console.error('获取模板失败:', e)
   }
-}
-
-// 应用预设配置
-function applyPreset(preset) {
-  form.value.apn = preset.apn
-  form.value.protocol = 'dual'
-  form.value.auth_method = 'chap'
-  form.value.username = ''
-  form.value.password = ''
 }
 
 // 保存配置
 async function saveConfig() {
-  if (!selectedContext.value) {
-    error(t('apn.selectFirst'))
+  // 手动模式必须选择模板
+  if (currentMode.value === 1 && selectedTemplateId.value <= 0) {
+    error(t('apn.selectTemplateFirst'))
     return
   }
-
-  const confirmed = await confirm({
-    title: t('apn.saveApn'),
-    message: t('apn.confirmSave', { apn: form.value.apn })
-  })
-  if (!confirmed) return
-
+  
   saving.value = true
   try {
-    const res = await setApnConfig({
-      context_path: selectedContext.value.path,
-      apn: form.value.apn,
-      protocol: form.value.protocol,
-      username: form.value.username,
-      password: form.value.password,
-      auth_method: form.value.auth_method
+    // 保存配置
+    const res = await fetch('/api/apn/config', {
+      method: 'POST',
+      headers: getHeaders(true),
+      body: JSON.stringify({
+        mode: currentMode.value,
+        template_id: currentMode.value === 1 ? selectedTemplateId.value : 0,
+        auto_start: currentMode.value === 1 ? autoStart.value : 0
+      })
     })
-    if (res.status === 'ok') {
-      success(t('apn.apnSaved'))
-      await fetchApnList()
-    } else {
-      throw new Error(res.message || t('apn.saveFailed'))
+    if (!res.ok) throw new Error('保存失败')
+    
+    // 自动模式：清除APN
+    if (currentMode.value === 0) {
+      const clearRes = await fetch('/api/apn/clear', { method: 'POST', headers: getHeaders(true) })
+      if (clearRes.ok) {
+        success(t('apn.apnCleared') || 'APN已清除，使用系统自动配置')
+      } else {
+        console.warn('清除APN失败，但配置已保存')
+        success(t('apn.configSaved') || '配置已保存')
+      }
+    } 
+    // 手动模式：应用模板（仅当选择了模板时）
+    else if (selectedTemplateId.value > 0) {
+      const applyRes = await fetch('/api/apn/apply', {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ template_id: selectedTemplateId.value })
+      })
+      if (applyRes.ok) {
+        success(t('apn.templateApplied'))
+      } else {
+        // 尝试获取错误详情
+        let errMsg = '应用模板失败'
+        try {
+          const errData = await applyRes.json()
+          if (errData.error) errMsg = errData.error
+        } catch {}
+        console.warn(errMsg + '，但配置已保存')
+        success(t('apn.configSaved') || '配置已保存（模板将在重启后生效）')
+      }
     }
-  } catch (err) {
-    error(t('apn.saveFailed') + ': ' + err.message)
+  } catch (e) {
+    error(t('apn.saveFailed') + ': ' + e.message)
   } finally {
     saving.value = false
   }
 }
 
-onMounted(() => {
-  fetchApnList()
+// 打开新建对话框
+function openNewDialog() {
+  isEditing.value = false
+  form.value = { id: 0, name: '', apn: '', protocol: 'dual', username: '', password: '', auth_method: 'chap' }
+  showDialog.value = true
+}
+
+// 打开编辑对话框
+function openEditDialog(tpl) {
+  isEditing.value = true
+  form.value = { ...tpl }
+  showDialog.value = true
+}
+
+// 应用预设
+function applyPreset(preset) {
+  form.value.name = preset.name
+  form.value.apn = preset.apn
+}
+
+// 保存模板
+async function saveTemplate() {
+  if (!form.value.name.trim() || !form.value.apn.trim()) {
+    error(t('apn.nameAndApnRequired'))
+    return
+  }
+  
+  saving.value = true
+  try {
+    const url = isEditing.value ? `/api/apn/templates/${form.value.id}` : '/api/apn/templates'
+    const method = isEditing.value ? 'PUT' : 'POST'
+    const res = await fetch(url, { method, headers: getHeaders(true), body: JSON.stringify(form.value) })
+    if (!res.ok) throw new Error('保存失败')
+    success(isEditing.value ? t('apn.templateUpdated') : t('apn.templateCreated'))
+    showDialog.value = false
+    await fetchTemplates()
+  } catch (e) {
+    error(e.message)
+  } finally {
+    saving.value = false
+  }
+}
+
+// 删除模板
+async function deleteTemplate(tpl) {
+  const ok = await confirm({ title: t('apn.deleteTemplate'), message: `确定删除 "${tpl.name}"?`, danger: true })
+  if (!ok) return
+  
+  try {
+    const res = await fetch(`/api/apn/templates/${tpl.id}`, { method: 'DELETE', headers: getHeaders() })
+    if (!res.ok) throw new Error('删除失败')
+    success(t('apn.templateDeleted'))
+    if (selectedTemplateId.value === tpl.id) selectedTemplateId.value = 0
+    await fetchTemplates()
+  } catch (e) {
+    error(e.message)
+  }
+}
+
+// 初始化
+onMounted(async () => {
+  loading.value = true
+  await Promise.all([fetchConfig(), fetchTemplates()])
+  loading.value = false
 })
 </script>
 
 <template>
   <div class="space-y-6">
-    <!-- 标题卡片 -->
-    <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-teal-50/80 via-cyan-50/60 to-blue-50/40 dark:from-teal-600/20 dark:via-cyan-600/20 dark:to-blue-600/20 border border-slate-200/60 dark:border-white/10 p-6 shadow-xl">
-      <div class="absolute top-0 right-0 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-      <div class="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div class="flex items-center space-x-4">
-          <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-teal-500/30">
-            <font-awesome-icon icon="globe" class="text-white text-2xl" />
-          </div>
-          <div>
-            <h2 class="text-slate-800 dark:text-white font-bold text-xl">{{ t('apn.title') }}</h2>
-            <p class="text-slate-600 dark:text-white/50 text-sm mt-1">{{ t('apn.subtitle') }}</p>
-          </div>
-        </div>
-        <!-- 当前状态 -->
-        <div v-if="activeContext" class="flex items-center space-x-3 px-4 py-2 rounded-xl bg-white/60 dark:bg-white/10 border border-slate-200/60 dark:border-white/10">
-          <div class="w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
-          <div class="text-sm">
-            <span class="text-slate-500 dark:text-white/50">{{ t('apn.currentApn') }}：</span>
-            <span class="font-semibold text-slate-800 dark:text-white">{{ activeContext.apn || t('apn.notConfigured') }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 快捷配置 -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      <button
-        v-for="preset in presets"
-        :key="preset.apn"
-        @click="applyPreset(preset)"
-        class="group relative overflow-hidden rounded-2xl bg-white/95 dark:bg-white/5 backdrop-blur-xl border border-slate-200/60 dark:border-white/10 p-4 shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-0.5"
-      >
-        <div :class="`absolute top-0 right-0 w-20 h-20 bg-gradient-to-br ${preset.color} opacity-10 rounded-full blur-xl -translate-y-1/2 translate-x-1/2 group-hover:scale-150 transition-transform duration-500`"></div>
-        <div class="relative flex items-center space-x-3">
-          <div :class="`w-10 h-10 rounded-xl bg-gradient-to-br ${preset.color} flex items-center justify-center shadow-lg`">
-            <font-awesome-icon :icon="preset.icon" class="text-white" />
-          </div>
-          <div class="text-left">
-            <div class="font-medium text-slate-800 dark:text-white text-sm">{{ preset.name }}</div>
-            <div class="text-xs text-slate-500 dark:text-white/50">{{ preset.apn }}</div>
-          </div>
-        </div>
-      </button>
-    </div>
-
-    <!-- 配置表单 -->
-    <div class="rounded-3xl bg-white/95 dark:bg-white/5 backdrop-blur-xl border border-slate-200/60 dark:border-white/10 shadow-xl overflow-hidden">
-      <div class="p-6 space-y-5">
-        <!-- APN 名称 -->
-        <div>
-          <label class="block text-sm font-medium text-slate-700 dark:text-white/80 mb-2">
-            <font-awesome-icon icon="tag" class="mr-2 text-teal-500" />{{ t('apn.apnName') }}
-          </label>
-          <input
-            v-model="form.apn"
-            type="text"
-            :placeholder="t('apn.apnPlaceholder')"
-            class="w-full px-4 py-3 rounded-xl bg-slate-100 dark:bg-white/10 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all"
-          />
-        </div>
-
-        <!-- 协议 -->
-        <div>
-          <label class="block text-sm font-medium text-slate-700 dark:text-white/80 mb-2">
-            <font-awesome-icon icon="network-wired" class="mr-2 text-teal-500" />{{ t('apn.protocol') }}
-          </label>
-          <div class="grid grid-cols-3 gap-3">
-            <button
-              v-for="opt in protocolOptions"
-              :key="opt.value"
-              @click="form.protocol = opt.value"
-              :class="[
-                'py-3 px-4 rounded-xl text-sm font-medium transition-all duration-300',
-                form.protocol === opt.value
-                  ? 'bg-gradient-to-r from-teal-500 to-cyan-500 text-white shadow-lg shadow-teal-500/30'
-                  : 'bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-white/60 hover:bg-slate-200 dark:hover:bg-white/20'
-              ]"
-            >
-              {{ opt.label }}
-            </button>
-          </div>
-        </div>
-
-        <!-- 用户名和密码 -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-700 dark:text-white/80 mb-2">
-              <font-awesome-icon icon="user" class="mr-2 text-teal-500" />{{ t('apn.username') }}
-            </label>
-            <input
-              v-model="form.username"
-              type="text"
-              :placeholder="t('apn.optional')"
-              class="w-full px-4 py-3 rounded-xl bg-slate-100 dark:bg-white/10 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all"
-            />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 dark:text-white/80 mb-2">
-              <font-awesome-icon icon="lock" class="mr-2 text-teal-500" />{{ t('apn.password') }}
-            </label>
-            <input
-              v-model="form.password"
-              type="password"
-              :placeholder="t('apn.optional')"
-              class="w-full px-4 py-3 rounded-xl bg-slate-100 dark:bg-white/10 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all"
-            />
-          </div>
-        </div>
-
-        <!-- 认证方式 -->
-        <div>
-          <label class="block text-sm font-medium text-slate-700 dark:text-white/80 mb-2">
-            <font-awesome-icon icon="shield-alt" class="mr-2 text-teal-500" />{{ t('apn.authType') }}
-          </label>
-          <div class="grid grid-cols-3 gap-3">
-            <button
-              v-for="opt in authOptions"
-              :key="opt.value"
-              @click="form.auth_method = opt.value"
-              :class="[
-                'py-3 px-4 rounded-xl text-sm font-medium transition-all duration-300',
-                form.auth_method === opt.value
-                  ? 'bg-gradient-to-r from-teal-500 to-cyan-500 text-white shadow-lg shadow-teal-500/30'
-                  : 'bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-white/60 hover:bg-slate-200 dark:hover:bg-white/20'
-              ]"
-            >
-              {{ opt.label }}
-            </button>
-          </div>
-        </div>
-
-        <!-- 保存按钮 -->
+    <!-- 模式选择 -->
+    <div class="bg-white/95 dark:bg-white/5 rounded-2xl border border-slate-200/60 dark:border-white/10 p-6 shadow-lg">
+      <h3 class="text-slate-900 dark:text-white font-semibold mb-4 flex items-center">
+        <i class="fas fa-sliders-h text-teal-500 mr-2"></i>
+        {{ t('apn.modeSelection') }}
+      </h3>
+      
+      <div class="grid grid-cols-2 gap-4">
+        <!-- 自动模式 -->
         <button
-          @click="saveConfig"
-          :disabled="saving || !form.apn"
-          class="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 text-white font-medium shadow-lg shadow-teal-500/30 hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+          @click="currentMode = 0"
+          :class="[
+            'p-5 rounded-xl border-2 text-left transition-all',
+            currentMode === 0
+              ? 'bg-blue-500/10 dark:bg-blue-500/20 border-blue-500 shadow-lg'
+              : 'bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 hover:border-slate-400'
+          ]"
         >
-          <font-awesome-icon v-if="saving" icon="spinner" spin />
-          <font-awesome-icon v-else icon="save" />
-          <span>{{ saving ? t('apn.saving') : t('apn.saveConfig') }}</span>
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center space-x-3">
+              <div :class="['w-10 h-10 rounded-xl flex items-center justify-center', currentMode === 0 ? 'bg-blue-500' : 'bg-slate-200 dark:bg-white/10']">
+                <i :class="['fas fa-magic', currentMode === 0 ? 'text-white' : 'text-slate-400']"></i>
+              </div>
+              <span class="text-slate-900 dark:text-white font-semibold">{{ t('apn.autoMode') }}</span>
+            </div>
+            <!-- 右侧选择指示器 -->
+            <div v-if="currentMode === 0" class="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center">
+              <i class="fas fa-check text-white text-xs"></i>
+            </div>
+            <div v-else class="w-6 h-6 rounded-full border-2 border-slate-300 dark:border-white/30"></div>
+          </div>
+          <p class="text-slate-500 dark:text-white/50 text-sm pl-13">{{ t('apn.autoModeDesc') }}</p>
+        </button>
+        
+        <!-- 手动模式 -->
+        <button
+          @click="currentMode = 1"
+          :class="[
+            'p-5 rounded-xl border-2 text-left transition-all',
+            currentMode === 1
+              ? 'bg-teal-500/10 dark:bg-teal-500/20 border-teal-500 shadow-lg'
+              : 'bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 hover:border-slate-400'
+          ]"
+        >
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center space-x-3">
+              <div :class="['w-10 h-10 rounded-xl flex items-center justify-center', currentMode === 1 ? 'bg-teal-500' : 'bg-slate-200 dark:bg-white/10']">
+                <i :class="['fas fa-cog', currentMode === 1 ? 'text-white' : 'text-slate-400']"></i>
+              </div>
+              <span class="text-slate-900 dark:text-white font-semibold">{{ t('apn.manualMode') }}</span>
+            </div>
+            <!-- 右侧选择指示器 -->
+            <div v-if="currentMode === 1" class="w-6 h-6 rounded-full bg-teal-500 flex items-center justify-center">
+              <i class="fas fa-check text-white text-xs"></i>
+            </div>
+            <div v-else class="w-6 h-6 rounded-full border-2 border-slate-300 dark:border-white/30"></div>
+          </div>
+          <p class="text-slate-500 dark:text-white/50 text-sm pl-13">{{ t('apn.manualModeDesc') }}</p>
         </button>
       </div>
     </div>
 
-    <!-- 提示信息 -->
-    <div class="rounded-2xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 p-4">
-      <div class="flex items-start space-x-3">
-        <font-awesome-icon icon="info-circle" class="text-blue-500 mt-0.5" />
-        <div class="text-sm text-blue-800 dark:text-blue-200">
-          <p class="font-medium mb-1">{{ t('apn.tips') }}</p>
-          <ul class="list-disc list-inside space-y-1 text-blue-700 dark:text-blue-300/80">
-            <li>{{ t('apn.tip1') }}</li>
-            <li>{{ t('apn.tip2') }}</li>
-            <li>{{ t('apn.tip3') }}</li>
-          </ul>
+    <!-- 自动模式提示 -->
+    <div v-show="currentMode === 0" class="bg-blue-50 dark:bg-blue-500/10 rounded-2xl border border-blue-200 dark:border-blue-500/20 p-6">
+      <div class="flex items-center space-x-4">
+        <div class="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center">
+          <i class="fas fa-info-circle text-blue-500 text-xl"></i>
+        </div>
+        <div>
+          <p class="text-blue-800 dark:text-blue-200 font-medium">{{ t('apn.autoModeHint') }}</p>
+          <p class="text-blue-600 dark:text-blue-300 text-sm mt-1">{{ t('apn.clearHint') }}</p>
         </div>
       </div>
     </div>
+
+    <!-- 手动模式：模板管理 -->
+    <div v-show="currentMode === 1" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- 模板列表 -->
+      <div class="bg-white/95 dark:bg-white/5 rounded-2xl border border-slate-200/60 dark:border-white/10 p-6 shadow-lg">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-slate-900 dark:text-white font-semibold flex items-center">
+            <i class="fas fa-layer-group text-teal-500 mr-2"></i>
+            {{ t('apn.templateList') }}
+          </h3>
+          <button @click="openNewDialog" class="px-3 py-1.5 bg-teal-500 text-white text-sm rounded-lg hover:bg-teal-600 transition-colors flex items-center">
+            <i class="fas fa-plus mr-1.5"></i>
+            {{ t('apn.newTemplate') }}
+          </button>
+        </div>
+        
+        <div class="space-y-2 max-h-80 overflow-y-auto">
+          <template v-if="templates.length > 0">
+            <div
+              v-for="tpl in templates"
+              :key="tpl.id"
+              @click="selectedTemplateId = tpl.id"
+              :class="[
+                'p-4 rounded-xl border-2 cursor-pointer transition-all',
+                selectedTemplateId === tpl.id
+                  ? 'bg-teal-500/10 dark:bg-teal-500/20 border-teal-500'
+                  : 'bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 hover:border-slate-400'
+              ]"
+            >
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                  <div :class="['w-9 h-9 rounded-lg flex items-center justify-center', selectedTemplateId === tpl.id ? 'bg-teal-500' : 'bg-slate-200 dark:bg-white/10']">
+                    <i :class="['fas fa-sim-card', selectedTemplateId === tpl.id ? 'text-white' : 'text-slate-400']"></i>
+                  </div>
+                  <div>
+                    <p class="text-slate-900 dark:text-white font-medium">{{ tpl.name }}</p>
+                    <p class="text-slate-500 dark:text-white/50 text-xs font-mono">{{ tpl.apn }}</p>
+                  </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                  <div :class="['w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all', selectedTemplateId === tpl.id ? 'border-teal-500 bg-teal-500' : 'border-slate-300 dark:border-white/30']">
+                    <i v-show="selectedTemplateId === tpl.id" class="fas fa-check text-white text-xs"></i>
+                  </div>
+                  <button @click.stop="openEditDialog(tpl)" class="w-8 h-8 rounded-lg bg-slate-200 dark:bg-white/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 flex items-center justify-center transition-colors">
+                    <i class="fas fa-pen text-blue-500 text-xs"></i>
+                  </button>
+                  <button @click.stop="deleteTemplate(tpl)" class="w-8 h-8 rounded-lg bg-slate-200 dark:bg-white/10 hover:bg-red-100 dark:hover:bg-red-500/20 flex items-center justify-center transition-colors">
+                    <i class="fas fa-trash-alt text-red-500 text-xs"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+          <div v-else class="text-center py-12">
+            <i class="fas fa-folder-open text-slate-300 dark:text-white/20 text-4xl mb-4 block"></i>
+            <p class="text-slate-500 dark:text-white/50">{{ t('apn.noTemplates') }}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 状态与设置 -->
+      <div class="space-y-6">
+        <!-- 当前状态 -->
+        <div class="bg-white/95 dark:bg-white/5 rounded-2xl border border-slate-200/60 dark:border-white/10 p-6 shadow-lg">
+          <h3 class="text-slate-900 dark:text-white font-semibold mb-4 flex items-center">
+            <i class="fas fa-info-circle text-blue-500 mr-2"></i>
+            {{ t('apn.currentStatus') }}
+          </h3>
+          <div class="space-y-3">
+            <div class="flex justify-between p-3 bg-slate-50 dark:bg-white/5 rounded-xl">
+              <span class="text-slate-600 dark:text-white/60">{{ t('apn.boundTemplate') }}</span>
+              <span class="text-slate-900 dark:text-white font-medium">{{ selectedTemplate?.name || t('apn.notSelected') }}</span>
+            </div>
+            <div v-if="selectedTemplate" class="flex justify-between p-3 bg-slate-50 dark:bg-white/5 rounded-xl">
+              <span class="text-slate-600 dark:text-white/60">APN</span>
+              <span class="text-slate-900 dark:text-white font-mono">{{ selectedTemplate.apn }}</span>
+            </div>
+            <!-- 应用状态 -->
+            <div v-if="currentTemplate" class="flex justify-between items-center p-3 bg-slate-50 dark:bg-white/5 rounded-xl">
+              <span class="text-slate-600 dark:text-white/60">{{ t('apn.applyStatus') || '应用状态' }}</span>
+              <span :class="[
+                'px-2.5 py-1 rounded-lg text-xs font-medium',
+                currentTemplate.is_applied 
+                  ? 'bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400' 
+                  : 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400'
+              ]">
+                <i :class="currentTemplate.is_applied ? 'fas fa-check-circle' : 'fas fa-exclamation-circle'" class="mr-1"></i>
+                {{ currentTemplate.is_applied ? (t('apn.applied') || '已应用') : (t('apn.notApplied') || '未应用') }}
+              </span>
+            </div>
+            <!-- 连接状态 -->
+            <div v-if="currentTemplate && currentTemplate.is_applied" class="flex justify-between items-center p-3 bg-slate-50 dark:bg-white/5 rounded-xl">
+              <span class="text-slate-600 dark:text-white/60">{{ t('apn.connectionStatus') || '连接状态' }}</span>
+              <span :class="[
+                'px-2.5 py-1 rounded-lg text-xs font-medium flex items-center',
+                currentTemplate.is_active 
+                  ? 'bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400' 
+                  : 'bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-white/50'
+              ]">
+                <span :class="['w-2 h-2 rounded-full mr-1.5', currentTemplate.is_active ? 'bg-green-500 animate-pulse' : 'bg-slate-400']"></span>
+                {{ currentTemplate.is_active ? (t('apn.active') || '已激活') : (t('apn.inactive') || '未激活') }}
+              </span>
+            </div>
+            <!-- Context路径 -->
+            <div v-if="currentTemplate && currentTemplate.is_applied && currentTemplate.applied_context" class="flex justify-between p-3 bg-slate-50 dark:bg-white/5 rounded-xl">
+              <span class="text-slate-600 dark:text-white/60">Context</span>
+              <span class="text-slate-900 dark:text-white font-mono text-sm">{{ currentTemplate.applied_context }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 自启动设置 -->
+        <div v-show="selectedTemplateId > 0" class="bg-white/95 dark:bg-white/5 rounded-2xl border border-slate-200/60 dark:border-white/10 p-6 shadow-lg">
+          <h3 class="text-slate-900 dark:text-white font-semibold mb-4 flex items-center">
+            <i class="fas fa-power-off text-green-500 mr-2"></i>
+            {{ t('apn.autoStart') }}
+          </h3>
+          <div class="flex items-center justify-between p-4 bg-slate-50 dark:bg-white/5 rounded-xl">
+            <div class="flex items-center space-x-3">
+              <div class="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-500/20 flex items-center justify-center">
+                <i class="fas fa-bolt text-green-500"></i>
+              </div>
+              <div>
+                <p class="text-slate-900 dark:text-white font-medium">{{ t('apn.autoStart') }}</p>
+                <p class="text-slate-500 dark:text-white/50 text-xs">{{ t('apn.autoStartDesc') }}</p>
+              </div>
+            </div>
+            <label class="relative cursor-pointer">
+              <input type="checkbox" v-model="autoStart" :true-value="1" :false-value="0" class="sr-only peer">
+              <div class="w-14 h-7 bg-slate-300 dark:bg-white/20 rounded-full peer peer-checked:bg-green-500 transition-all"></div>
+              <div class="absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform peer-checked:translate-x-7"></div>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 保存按钮 -->
+    <button
+      @click="saveConfig"
+      :disabled="saving || (currentMode === 1 && !selectedTemplateId)"
+      class="w-full py-4 bg-gradient-to-r from-teal-500 to-cyan-500 text-white font-semibold rounded-xl hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+    >
+      <i :class="saving ? 'fas fa-spinner animate-spin' : 'fas fa-save'"></i>
+      <span>{{ saving ? t('common.saving') : t('common.save') }}</span>
+    </button>
+
+    <!-- 模板编辑弹窗 -->
+    <Teleport to="body">
+      <div v-show="showDialog" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="showDialog = false"></div>
+        <div class="relative w-full max-w-lg bg-white dark:bg-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+          <!-- 头部 -->
+          <div class="px-6 py-4 bg-teal-500 text-white flex items-center justify-between">
+            <h3 class="font-semibold">{{ isEditing ? t('apn.editTemplate') : t('apn.newTemplate') }}</h3>
+            <button @click="showDialog = false" class="w-8 h-8 rounded-lg hover:bg-white/20 flex items-center justify-center">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          
+          <!-- 预设 -->
+          <div v-show="!isEditing" class="px-6 py-3 bg-slate-50 dark:bg-white/5 border-b border-slate-200 dark:border-white/10">
+            <p class="text-slate-600 dark:text-white/60 text-xs mb-2">{{ t('apn.quickPresets') }}</p>
+            <div class="flex gap-2">
+              <button v-for="p in presets" :key="p.apn" @click="applyPreset(p)" :class="[p.color, 'px-3 py-1.5 rounded-lg text-white text-xs font-medium hover:opacity-80']">
+                {{ p.name }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 表单 -->
+          <div class="p-6 space-y-4">
+            <div>
+              <label class="block text-slate-700 dark:text-white/80 text-sm font-medium mb-1.5">
+                {{ t('apn.templateName') }} <span class="text-red-500">*</span>
+              </label>
+              <input v-model="form.name" type="text" :placeholder="t('apn.templateNamePlaceholder')"
+                class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white focus:border-teal-500 outline-none transition-all">
+            </div>
+            
+            <div>
+              <label class="block text-slate-700 dark:text-white/80 text-sm font-medium mb-1.5">
+                {{ t('apn.apnName') }} <span class="text-red-500">*</span>
+              </label>
+              <input v-model="form.apn" type="text" :placeholder="t('apn.apnPlaceholder')"
+                class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white font-mono focus:border-teal-500 outline-none transition-all">
+            </div>
+            
+            <div>
+              <label class="block text-slate-700 dark:text-white/80 text-sm font-medium mb-1.5">{{ t('apn.protocol') }}</label>
+              <select v-model="form.protocol" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white focus:border-teal-500 outline-none appearance-none cursor-pointer">
+                <option value="dual" class="bg-white dark:bg-slate-700">{{ t('apn.dualStack') }}</option>
+                <option value="ip" class="bg-white dark:bg-slate-700">{{ t('apn.ipv4') }}</option>
+                <option value="ipv6" class="bg-white dark:bg-slate-700">{{ t('apn.ipv6') }}</option>
+              </select>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-slate-700 dark:text-white/80 text-sm font-medium mb-1.5">{{ t('apn.username') }}</label>
+                <input v-model="form.username" type="text" :placeholder="t('apn.optional')"
+                  class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white focus:border-teal-500 outline-none transition-all">
+              </div>
+              <div>
+                <label class="block text-slate-700 dark:text-white/80 text-sm font-medium mb-1.5">{{ t('apn.password') }}</label>
+                <input v-model="form.password" type="password" :placeholder="t('apn.optional')"
+                  class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white focus:border-teal-500 outline-none transition-all">
+              </div>
+            </div>
+            
+            <div>
+              <label class="block text-slate-700 dark:text-white/80 text-sm font-medium mb-1.5">{{ t('apn.authType') }}</label>
+              <select v-model="form.auth_method" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white focus:border-teal-500 outline-none appearance-none cursor-pointer">
+                <option value="chap" class="bg-white dark:bg-slate-700">CHAP</option>
+                <option value="pap" class="bg-white dark:bg-slate-700">PAP</option>
+                <option value="none" class="bg-white dark:bg-slate-700">{{ t('apn.noAuth') }}</option>
+              </select>
+            </div>
+          </div>
+          
+          <!-- 底部按钮 -->
+          <div class="px-6 py-4 bg-slate-50 dark:bg-white/5 border-t border-slate-200 dark:border-white/10 flex justify-end space-x-3">
+            <button @click="showDialog = false" class="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-white/60 hover:bg-slate-100 dark:hover:bg-white/10">
+              {{ t('common.cancel') }}
+            </button>
+            <button @click="saveTemplate" :disabled="saving" class="px-5 py-2.5 rounded-xl bg-teal-500 text-white hover:bg-teal-600 disabled:opacity-50 flex items-center space-x-2">
+              <i :class="saving ? 'fas fa-spinner animate-spin' : 'fas fa-check'"></i>
+              <span>{{ t('common.save') }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 加载遮罩 -->
+    <Teleport to="body">
+      <div v-show="loading" class="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm flex items-center justify-center">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-2xl flex items-center space-x-4">
+          <i class="fas fa-spinner animate-spin text-teal-500 text-2xl"></i>
+          <span class="text-slate-700 dark:text-white">{{ t('common.loading') }}</span>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

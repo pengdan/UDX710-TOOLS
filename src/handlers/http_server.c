@@ -21,6 +21,7 @@
 #include "usb_mode.h"
 #include "http_utils.h"
 #include "auth.h"
+#include "apn.h"
 
 /* 嵌入式文件系统声明 (packed_fs.c) */
 extern int serve_packed_file(struct mg_connection *c, struct mg_http_message *hm);
@@ -273,13 +274,41 @@ static void http_handler(struct mg_connection *c, int ev, void *ev_data) {
         else if (mg_match(hm->uri, mg_str("/api/roaming"), NULL)) {
             handle_roaming_status(c, hm);
         }
-        /* APN 管理 API */
-        else if (mg_match(hm->uri, mg_str("/api/apn"), NULL)) {
+        // /* APN 管理 API */
+        // else if (mg_match(hm->uri, mg_str("/api/apn"), NULL)) {
+        //     if (hm->method.len == 3 && memcmp(hm->method.buf, "GET", 3) == 0) {
+        //         handle_apn_list(c, hm);
+        //     } else {
+        //         handle_apn_set(c, hm);
+        //     }
+        // }
+        /* APN 配置管理 API */
+        else if (mg_match(hm->uri, mg_str("/api/apn/config"), NULL)) {
             if (hm->method.len == 3 && memcmp(hm->method.buf, "GET", 3) == 0) {
-                handle_apn_list(c, hm);
+                handle_apn_config_get(c, hm);
             } else {
-                handle_apn_set(c, hm);
+                handle_apn_config_set(c, hm);
             }
+        }
+        else if (mg_match(hm->uri, mg_str("/api/apn/templates"), NULL)) {
+            if (hm->method.len == 3 && memcmp(hm->method.buf, "GET", 3) == 0) {
+                handle_apn_templates_list(c, hm);
+            } else {
+                handle_apn_templates_create(c, hm);
+            }
+        }
+        else if (mg_match(hm->uri, mg_str("/api/apn/templates/*"), NULL)) {
+            if (hm->method.len == 3 && memcmp(hm->method.buf, "PUT", 3) == 0) {
+                handle_apn_templates_update(c, hm);
+            } else {
+                handle_apn_templates_delete(c, hm);
+            }
+        }
+        else if (mg_match(hm->uri, mg_str("/api/apn/apply"), NULL)) {
+            handle_apn_apply(c, hm);
+        }
+        else if (mg_match(hm->uri, mg_str("/api/apn/clear"), NULL)) {
+            handle_apn_clear(c, hm);
         }
         /* 插件管理 API */
         else if (mg_match(hm->uri, mg_str("/api/shell"), NULL)) {
@@ -355,6 +384,11 @@ int http_server_start(const char *port) {
     /* 初始化认证模块 */
     if (auth_init() != 0) {
         printf("警告: 认证模块初始化失败\n");
+    }
+
+    /* 初始化APN模块 */
+    if (apn_init("6677.db") != 0) {
+        printf("警告: APN模块初始化失败\n");
     }
 
     /* 初始化 mongoose */

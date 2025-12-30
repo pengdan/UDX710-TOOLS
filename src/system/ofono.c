@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <pthread.h>
+#include <unistd.h>
 #include "ofono.h"
 #include "dbus_core.h"
 #include "sysinfo.h"
@@ -1231,4 +1232,245 @@ int ofono_get_serving_cell_tech(char *tech, int size) {
     g_variant_unref(result);
     g_object_unref(proxy);
     return ret;
+}
+
+
+/* ==================== 数据连接 Watchdog 实现 ==================== */
+
+static pthread_t g_watchdog_thread = 0;
+static volatile int g_watchdog_running = 0;
+static int g_watchdog_interval = 10;  /* 默认10秒 */
+static char g_last_watchdog_status[256] = {0};
+
+/**
+ * 获取网络注册状态
+ */
+int ofono_get_network_status(char *status, int size) {
+    GError *error = NULL;
+    GVariant *result = NULL;
+    GDBusProxy *proxy = NULL;
+    int ret = -1;
+
+    if (!status || size <= 0 || !ensure_connection()) {
+        return -1;
+    }
+
+    status[0] = '\0';
+
+    proxy = g_dbus_proxy_new_sync(
+        g_dbus_conn, G_DBUS_PROXY_FLAGS_NONE, NULL,
+        OFONO_SERVICE, DEFAULT_MODEM_PATH, OFONO_NETWORK_REGISTRATION,
+        NULL, &error
+    );
+
+    if (!proxy) {
+        if (error) g_error_free(error);
+        return -2;
+    }
+
+    result = g_dbus_proxy_call_sync(
+        proxy, "GetProperties", NULL,
+        G_DBUS_CALL_FLAGS_NONE, OFONO_TIMEOUT_MS, NULL, &error
+    );
+
+    if (!result) {
+        if (error) g_error_free(error);
+        g_object_unref(proxy);
+        return -3;
+    }
+
+    GVariant *props = g_variant_get_child_value(result, 0);
+    if (props) {
+        GVariantIter iter;
+        const gchar *key;
+        GVariant *value;
+
+        g_variant_iter_init(&iter, props);
+        while (g_variant_iter_next(&iter, "{&sv}", &key, &value)) {
+            if (g_strcmp0(key, "Status") == 0) {
+                const gchar *stat = g_variant_get_string(value, NULL);
+                if (stat) {
+                    strncpy(status, stat, size - 1);
+                    status[size - 1] = '\0';
+                    ret = 0;
+                }
+                g_variant_unref(value);
+                break;
+            }
+            g_variant_unref(value);
+        }
+        g_variant_unref(props);
+    }
+
+    g_variant_unref(result);
+    g_object_unref(proxy);
+    return ret;
+}
+
+/**
+ * 检查并恢复数据连接
+ */
+int ofono_check_and_restore_data(char *result, int size) {
+    char net_status[64] = {0};
+    char context_path[256] = {0};
+    int active = 0;
+
+    if (!result || size <= 0) {
+        return -1;
+    }
+
+    /* 1. 检查网络注册状态 */
+    if (ofono_get_network_status(net_status, sizeof(net_status)) != 0) {
+        snprintf(result, size, "无法获取网络状态");
+        return -1;
+    }
+
+    if (strcmp(net_status, "registered") != 0 && strcmp(net_status, "roaming") != 0) {
+        snprintf(result, size, "等待网络注册 (状态: %s)", net_status);
+        return 0;
+    }
+
+    /* 2. 获取 internet context 路径 */
+    if (find_internet_context_path(context_path, sizeof(context_path)) != 0) {
+        snprintf(result, size, "未找到 internet context");
+        return -1;
+    }
+
+    /* 3. 获取 context 属性 */
+    GError *error = NULL;
+    GVariant *ctx_result = NULL;
+    GDBusProxy *proxy = NULL;
+    char apn[128] = {0};
+
+    proxy = g_dbus_proxy_new_sync(
+        g_dbus_conn, G_DBUS_PROXY_FLAGS_NONE, NULL,
+        OFONO_SERVICE, context_path, OFONO_CONNECTION_CONTEXT,
+        NULL, &error
+    );
+
+    if (!proxy) {
+        if (error) g_error_free(error);
+        snprintf(result, size, "创建 context 代理失败");
+        return -1;
+    }
+
+    ctx_result = g_dbus_proxy_call_sync(
+        proxy, "GetProperties", NULL,
+        G_DBUS_CALL_FLAGS_NONE, OFONO_TIMEOUT_MS, NULL, &error
+    );
+
+    if (!ctx_result) {
+        if (error) g_error_free(error);
+        g_object_unref(proxy);
+        snprintf(result, size, "获取 context 属性失败");
+        return -1;
+    }
+
+    GVariant *props = g_variant_get_child_value(ctx_result, 0);
+    if (props) {
+        GVariant *v;
+        
+        v = g_variant_lookup_value(props, "Active", G_VARIANT_TYPE_BOOLEAN);
+        if (v) { active = g_variant_get_boolean(v) ? 1 : 0; g_variant_unref(v); }
+
+        v = g_variant_lookup_value(props, "AccessPointName", G_VARIANT_TYPE_STRING);
+        if (v) { strncpy(apn, g_variant_get_string(v, NULL), sizeof(apn) - 1); g_variant_unref(v); }
+
+        g_variant_unref(props);
+    }
+
+    g_variant_unref(ctx_result);
+    g_object_unref(proxy);
+
+    /* 4. 检查 APN 是否配置 */
+    if (strlen(apn) == 0) {
+        snprintf(result, size, "APN 未配置，跳过自动连接");
+        return 0;
+    }
+
+    /* 5. 如果已激活，返回正常状态 */
+    if (active) {
+        snprintf(result, size, "已连接 (APN: %s)", apn);
+        return 0;
+    }
+
+    /* 6. 尝试激活数据连接 */
+    if (ofono_set_data_status(1) == 0) {
+        snprintf(result, size, "连接已恢复 (APN: %s)", apn);
+        return 0;
+    } else {
+        snprintf(result, size, "激活失败 (APN: %s)", apn);
+        return -1;
+    }
+}
+
+/**
+ * Watchdog 线程函数
+ */
+static void *data_watchdog_thread(void *arg) {
+    (void)arg;
+    char status[256];
+
+    printf("[Watchdog] 数据连接监控线程已启动 (间隔: %d秒)\n", g_watchdog_interval);
+
+    while (g_watchdog_running) {
+        /* 检查并恢复数据连接 */
+        if (ofono_check_and_restore_data(status, sizeof(status)) >= 0) {
+            /* 只在状态变化时打印日志 */
+            if (strcmp(status, g_last_watchdog_status) != 0) {
+                printf("[Watchdog] %s\n", status);
+                strncpy(g_last_watchdog_status, status, sizeof(g_last_watchdog_status) - 1);
+            }
+        }
+
+        /* 等待下一次检查 */
+        for (int i = 0; i < g_watchdog_interval && g_watchdog_running; i++) {
+            sleep(1);
+        }
+    }
+
+    printf("[Watchdog] 数据连接监控线程已停止\n");
+    return NULL;
+}
+
+/**
+ * 启动数据连接 Watchdog 线程
+ */
+int ofono_start_data_watchdog(int interval_secs) {
+    if (g_watchdog_running) {
+        printf("[Watchdog] 已在运行中\n");
+        return 0;
+    }
+
+    g_watchdog_interval = (interval_secs > 0) ? interval_secs : 10;
+    g_watchdog_running = 1;
+    g_last_watchdog_status[0] = '\0';
+
+    if (pthread_create(&g_watchdog_thread, NULL, data_watchdog_thread, NULL) != 0) {
+        g_watchdog_running = 0;
+        printf("[Watchdog] 创建线程失败\n");
+        return -1;
+    }
+
+    pthread_detach(g_watchdog_thread);
+    return 0;
+}
+
+/**
+ * 停止数据连接 Watchdog 线程
+ */
+void ofono_stop_data_watchdog(void) {
+    if (!g_watchdog_running) {
+        return;
+    }
+
+    g_watchdog_running = 0;
+    /* 线程会在下一次循环时自动退出 */
+}
+
+/**
+ * 检查 Watchdog 是否运行中
+ */
+int ofono_is_watchdog_running(void) {
+    return g_watchdog_running ? 1 : 0;
 }

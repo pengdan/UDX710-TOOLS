@@ -27,9 +27,12 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "警告: ofono D-Bus 连接失败，部分功能可能不可用\n");
     }
 
+    /* 注意: 数据连接 Watchdog 由 APN 模块在用户配置 APN 后启动 */
+
     /* 启动 HTTP 服务器 */
     if (http_server_start(port) != 0) {
         fprintf(stderr, "服务器启动失败\n");
+        ofono_stop_data_watchdog();
         ofono_deinit();
         return 1;
     }
@@ -39,6 +42,7 @@ int main(int argc, char *argv[]) {
 
     /* 清理 */
     http_server_stop();
+    ofono_stop_data_watchdog();
     ofono_deinit();
 
     return 0;

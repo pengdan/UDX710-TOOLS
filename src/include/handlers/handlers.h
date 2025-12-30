@@ -52,9 +52,19 @@ void handle_set_system_time(struct mg_connection *c, struct mg_http_message *hm)
 void handle_data_status(struct mg_connection *c, struct mg_http_message *hm);
 void handle_roaming_status(struct mg_connection *c, struct mg_http_message *hm);
 
-/* APN 管理 API */
-void handle_apn_list(struct mg_connection *c, struct mg_http_message *hm);
-void handle_apn_set(struct mg_connection *c, struct mg_http_message *hm);
+// /* APN 管理 API */
+// void handle_apn_list(struct mg_connection *c, struct mg_http_message *hm);
+// void handle_apn_set(struct mg_connection *c, struct mg_http_message *hm);
+
+/* APN 配置管理 API */
+void handle_apn_config_get(struct mg_connection *c, struct mg_http_message *hm);
+void handle_apn_config_set(struct mg_connection *c, struct mg_http_message *hm);
+void handle_apn_templates_list(struct mg_connection *c, struct mg_http_message *hm);
+void handle_apn_templates_create(struct mg_connection *c, struct mg_http_message *hm);
+void handle_apn_templates_update(struct mg_connection *c, struct mg_http_message *hm);
+void handle_apn_templates_delete(struct mg_connection *c, struct mg_http_message *hm);
+void handle_apn_apply(struct mg_connection *c, struct mg_http_message *hm);
+void handle_apn_clear(struct mg_connection *c, struct mg_http_message *hm);
 
 /* 插件管理 API */
 void handle_shell_execute(struct mg_connection *c, struct mg_http_message *hm);

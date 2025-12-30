@@ -189,6 +189,44 @@ int ofono_set_apn_properties(const char *context_path,
  */
 int ofono_get_serving_cell_tech(char *tech, int size);
 
+/* ==================== 数据连接 Watchdog API ==================== */
+
+/**
+ * 获取网络注册状态
+ * @param status 输出状态字符串 (如 "registered", "roaming", "searching")
+ * @param size 缓冲区大小
+ * @return 成功返回0，失败返回错误码
+ */
+int ofono_get_network_status(char *status, int size);
+
+/**
+ * 检查并恢复数据连接
+ * 检查当前数据连接状态，如果APN已配置但未激活则自动激活
+ * @param result 输出结果描述字符串
+ * @param size 缓冲区大小
+ * @return 成功返回0，失败返回错误码
+ */
+int ofono_check_and_restore_data(char *result, int size);
+
+/**
+ * 启动数据连接 Watchdog 线程
+ * 后台定时检查数据连接状态，断开时自动重连
+ * @param interval_secs 检查间隔（秒），默认10秒
+ * @return 成功返回0，失败返回-1
+ */
+int ofono_start_data_watchdog(int interval_secs);
+
+/**
+ * 停止数据连接 Watchdog 线程
+ */
+void ofono_stop_data_watchdog(void);
+
+/**
+ * 检查 Watchdog 是否运行中
+ * @return 运行中返回1，否则返回0
+ */
+int ofono_is_watchdog_running(void);
+
 #ifdef __cplusplus
 }
 #endif

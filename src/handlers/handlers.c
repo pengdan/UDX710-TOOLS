@@ -17,6 +17,7 @@
 #include "airplane.h"
 #include "modem.h"
 #include "http_utils.h"
+#include "apn.h"
 
 
 /* GET /api/info - 获取系统信息 */
@@ -1123,130 +1124,130 @@ void handle_roaming_status(struct mg_connection *c, struct mg_http_message *hm) 
 
 /* ==================== APN 管理 API ==================== */
 
-/* GET /api/apn - 获取 APN 列表 */
-void handle_apn_list(struct mg_connection *c, struct mg_http_message *hm) {
-    HTTP_CHECK_GET(c, hm);
+// /* GET /api/apn - 获取 APN 列表 */
+// void handle_apn_list(struct mg_connection *c, struct mg_http_message *hm) {
+//     HTTP_CHECK_GET(c, hm);
 
-    ApnContext contexts[MAX_APN_CONTEXTS];
-    int count = ofono_get_all_apn_contexts(contexts, MAX_APN_CONTEXTS);
+//     ApnContext contexts[MAX_APN_CONTEXTS];
+//     int count = ofono_get_all_apn_contexts(contexts, MAX_APN_CONTEXTS);
 
-    if (count < 0) {
-        HTTP_OK(c, "{\"status\":\"error\",\"message\":\"Failed to get APN list\"}");
-        return;
-    }
+//     if (count < 0) {
+//         HTTP_OK(c, "{\"status\":\"error\",\"message\":\"Failed to get APN list\"}");
+//         return;
+//     }
 
-    /* 构建 JSON 响应 */
-    char json[8192];
-    int offset = 0;
-    offset += snprintf(json + offset, sizeof(json) - offset, 
-        "{\"status\":\"ok\",\"message\":\"Success\",\"data\":{\"contexts\":[");
+//     /* 构建 JSON 响应 */
+//     char json[8192];
+//     int offset = 0;
+//     offset += snprintf(json + offset, sizeof(json) - offset, 
+//         "{\"status\":\"ok\",\"message\":\"Success\",\"data\":{\"contexts\":[");
 
-    for (int i = 0; i < count; i++) {
-        ApnContext *ctx = &contexts[i];
-        offset += snprintf(json + offset, sizeof(json) - offset,
-            "%s{"
-            "\"path\":\"%s\","
-            "\"name\":\"%s\","
-            "\"active\":%s,"
-            "\"apn\":\"%s\","
-            "\"protocol\":\"%s\","
-            "\"username\":\"%s\","
-            "\"password\":\"%s\","
-            "\"auth_method\":\"%s\","
-            "\"context_type\":\"%s\""
-            "}",
-            i > 0 ? "," : "",
-            ctx->path, ctx->name, ctx->active ? "true" : "false",
-            ctx->apn, ctx->protocol, ctx->username, ctx->password,
-            ctx->auth_method, ctx->context_type);
-    }
+//     for (int i = 0; i < count; i++) {
+//         ApnContext *ctx = &contexts[i];
+//         offset += snprintf(json + offset, sizeof(json) - offset,
+//             "%s{"
+//             "\"path\":\"%s\","
+//             "\"name\":\"%s\","
+//             "\"active\":%s,"
+//             "\"apn\":\"%s\","
+//             "\"protocol\":\"%s\","
+//             "\"username\":\"%s\","
+//             "\"password\":\"%s\","
+//             "\"auth_method\":\"%s\","
+//             "\"context_type\":\"%s\""
+//             "}",
+//             i > 0 ? "," : "",
+//             ctx->path, ctx->name, ctx->active ? "true" : "false",
+//             ctx->apn, ctx->protocol, ctx->username, ctx->password,
+//             ctx->auth_method, ctx->context_type);
+//     }
 
-    offset += snprintf(json + offset, sizeof(json) - offset, "]}}");
-    HTTP_OK(c, json);
-}
+//     offset += snprintf(json + offset, sizeof(json) - offset, "]}}");
+//     HTTP_OK(c, json);
+// }
 
-/* POST /api/apn - 设置 APN 配置 */
-void handle_apn_set(struct mg_connection *c, struct mg_http_message *hm) {
-    HTTP_CHECK_POST(c, hm);
+// /* POST /api/apn - 设置 APN 配置 */
+// void handle_apn_set(struct mg_connection *c, struct mg_http_message *hm) {
+//     HTTP_CHECK_POST(c, hm);
 
-    char context_path[128] = {0};
-    char apn[128] = {0};
-    char protocol[32] = {0};
-    char username[128] = {0};
-    char password[128] = {0};
-    char auth_method[32] = {0};
+//     char context_path[128] = {0};
+//     char apn[128] = {0};
+//     char protocol[32] = {0};
+//     char username[128] = {0};
+//     char password[128] = {0};
+//     char auth_method[32] = {0};
 
-    /* 解析 JSON 请求体 */
-    char *str;
-    str = mg_json_get_str(hm->body, "$.context_path");
-    if (str) { strncpy(context_path, str, sizeof(context_path) - 1); free(str); }
+//     /* 解析 JSON 请求体 */
+//     char *str;
+//     str = mg_json_get_str(hm->body, "$.context_path");
+//     if (str) { strncpy(context_path, str, sizeof(context_path) - 1); free(str); }
 
-    str = mg_json_get_str(hm->body, "$.apn");
-    if (str) { strncpy(apn, str, sizeof(apn) - 1); free(str); }
+//     str = mg_json_get_str(hm->body, "$.apn");
+//     if (str) { strncpy(apn, str, sizeof(apn) - 1); free(str); }
 
-    str = mg_json_get_str(hm->body, "$.protocol");
-    if (str) { strncpy(protocol, str, sizeof(protocol) - 1); free(str); }
+//     str = mg_json_get_str(hm->body, "$.protocol");
+//     if (str) { strncpy(protocol, str, sizeof(protocol) - 1); free(str); }
 
-    str = mg_json_get_str(hm->body, "$.username");
-    if (str) { strncpy(username, str, sizeof(username) - 1); free(str); }
+//     str = mg_json_get_str(hm->body, "$.username");
+//     if (str) { strncpy(username, str, sizeof(username) - 1); free(str); }
 
-    str = mg_json_get_str(hm->body, "$.password");
-    if (str) { strncpy(password, str, sizeof(password) - 1); free(str); }
+//     str = mg_json_get_str(hm->body, "$.password");
+//     if (str) { strncpy(password, str, sizeof(password) - 1); free(str); }
 
-    str = mg_json_get_str(hm->body, "$.auth_method");
-    if (str) { strncpy(auth_method, str, sizeof(auth_method) - 1); free(str); }
+//     str = mg_json_get_str(hm->body, "$.auth_method");
+//     if (str) { strncpy(auth_method, str, sizeof(auth_method) - 1); free(str); }
 
-    /* 验证必填字段 */
-    if (strlen(context_path) == 0) {
-        HTTP_ERROR(c, 400, "context_path is required");
-        return;
-    }
+//     /* 验证必填字段 */
+//     if (strlen(context_path) == 0) {
+//         HTTP_ERROR(c, 400, "context_path is required");
+//         return;
+//     }
 
-    /* 调用设置函数 */
-    int ret = ofono_set_apn_properties(
-        context_path,
-        strlen(apn) > 0 ? apn : NULL,
-        strlen(protocol) > 0 ? protocol : NULL,
-        strlen(username) > 0 ? username : NULL,
-        strlen(password) > 0 ? password : NULL,
-        strlen(auth_method) > 0 ? auth_method : NULL
-    );
+//     /* 调用设置函数 */
+//     int ret = ofono_set_apn_properties(
+//         context_path,
+//         strlen(apn) > 0 ? apn : NULL,
+//         strlen(protocol) > 0 ? protocol : NULL,
+//         strlen(username) > 0 ? username : NULL,
+//         strlen(password) > 0 ? password : NULL,
+//         strlen(auth_method) > 0 ? auth_method : NULL
+//     );
 
-    if (ret == 0) {
-        /* 获取更新后的配置 */
-        ApnContext contexts[MAX_APN_CONTEXTS];
-        int count = ofono_get_all_apn_contexts(contexts, MAX_APN_CONTEXTS);
+//     if (ret == 0) {
+//         /* 获取更新后的配置 */
+//         ApnContext contexts[MAX_APN_CONTEXTS];
+//         int count = ofono_get_all_apn_contexts(contexts, MAX_APN_CONTEXTS);
         
-        /* 查找刚修改的 context */
-        ApnContext *updated = NULL;
-        for (int i = 0; i < count; i++) {
-            if (strcmp(contexts[i].path, context_path) == 0) {
-                updated = &contexts[i];
-                break;
-            }
-        }
+//         /* 查找刚修改的 context */
+//         ApnContext *updated = NULL;
+//         for (int i = 0; i < count; i++) {
+//             if (strcmp(contexts[i].path, context_path) == 0) {
+//                 updated = &contexts[i];
+//                 break;
+//             }
+//         }
 
-        char json[2048];
-        if (updated) {
-            snprintf(json, sizeof(json),
-                "{\"status\":\"ok\",\"message\":\"APN configuration updated successfully\","
-                "\"data\":{\"updated_context\":{"
-                "\"path\":\"%s\",\"name\":\"%s\",\"active\":%s,"
-                "\"apn\":\"%s\",\"protocol\":\"%s\",\"username\":\"%s\","
-                "\"password\":\"%s\",\"auth_method\":\"%s\",\"context_type\":\"%s\""
-                "}}}",
-                updated->path, updated->name, updated->active ? "true" : "false",
-                updated->apn, updated->protocol, updated->username,
-                updated->password, updated->auth_method, updated->context_type);
-        } else {
-            snprintf(json, sizeof(json),
-                "{\"status\":\"ok\",\"message\":\"APN configuration updated successfully\",\"data\":{}}");
-        }
-        HTTP_OK(c, json);
-    } else {
-        HTTP_OK(c, "{\"status\":\"error\",\"message\":\"Failed to set APN configuration\"}");
-    }
-}
+//         char json[2048];
+//         if (updated) {
+//             snprintf(json, sizeof(json),
+//                 "{\"status\":\"ok\",\"message\":\"APN configuration updated successfully\","
+//                 "\"data\":{\"updated_context\":{"
+//                 "\"path\":\"%s\",\"name\":\"%s\",\"active\":%s,"
+//                 "\"apn\":\"%s\",\"protocol\":\"%s\",\"username\":\"%s\","
+//                 "\"password\":\"%s\",\"auth_method\":\"%s\",\"context_type\":\"%s\""
+//                 "}}}",
+//                 updated->path, updated->name, updated->active ? "true" : "false",
+//                 updated->apn, updated->protocol, updated->username,
+//                 updated->password, updated->auth_method, updated->context_type);
+//         } else {
+//             snprintf(json, sizeof(json),
+//                 "{\"status\":\"ok\",\"message\":\"APN configuration updated successfully\",\"data\":{}}");
+//         }
+//         HTTP_OK(c, json);
+//     } else {
+//         HTTP_OK(c, "{\"status\":\"error\",\"message\":\"Failed to set APN configuration\"}");
+//     }
+// }
 
 /* ==================== 插件管理 API ==================== */
 #include "plugin.h"
@@ -1842,4 +1843,253 @@ void handle_auth_status(struct mg_connection *c, struct mg_http_message *hm) {
         required ? "true" : "false");
     
     HTTP_OK(c, response);
+}
+
+/* ==================== APN 配置管理 ==================== */
+
+/* GET /api/apn/config - 获取APN配置 */
+void handle_apn_config_get(struct mg_connection *c, struct mg_http_message *hm) {
+    HTTP_CHECK_GET(c, hm);
+    
+    ApnConfig config;
+    ApnTemplateStatus tpl_status;
+    char *response = (char *)malloc(4096);
+    
+    if (!response) {
+        HTTP_ERROR(c, 500, "内存分配失败");
+        return;
+    }
+    
+    if (apn_get_config(&config) != 0) {
+        free(response);
+        HTTP_ERROR(c, 500, "获取配置失败");
+        return;
+    }
+    
+    /* 如果是手动模式且有绑定模板，获取模板详情及应用状态 */
+    int has_template = 0;
+    if (config.mode == 1 && config.template_id > 0) {
+        if (apn_template_get_status(config.template_id, &tpl_status) == 0) {
+            has_template = 1;
+        }
+    }
+    
+    if (has_template) {
+        /* 转义模板名称中的特殊字符 */
+        char escaped_name[512];
+        char escaped_apn[512];
+        json_escape_string(tpl_status.template.name, escaped_name, sizeof(escaped_name));
+        json_escape_string(tpl_status.template.apn, escaped_apn, sizeof(escaped_apn));
+        
+        snprintf(response, 4096,
+            "{\"status\":\"ok\",\"message\":\"\",\"data\":{"
+            "\"mode\":%d,\"template_id\":%d,\"auto_start\":%d,"
+            "\"template\":{\"id\":%d,\"name\":\"%s\",\"apn\":\"%s\",\"protocol\":\"%s\","
+            "\"username\":\"%s\",\"password\":\"%s\",\"auth_method\":\"%s\","
+            "\"is_applied\":%d,\"is_active\":%d,\"applied_context\":\"%s\"}}}",
+            config.mode, config.template_id, config.auto_start,
+            tpl_status.template.id, escaped_name, escaped_apn, tpl_status.template.protocol,
+            tpl_status.template.username, tpl_status.template.password, tpl_status.template.auth_method,
+            tpl_status.is_applied, tpl_status.is_active, tpl_status.applied_context);
+    } else {
+        snprintf(response, 4096,
+            "{\"status\":\"ok\",\"message\":\"\",\"data\":{"
+            "\"mode\":%d,\"template_id\":%d,\"auto_start\":%d,\"template\":null}}",
+            config.mode, config.template_id, config.auto_start);
+    }
+    
+    HTTP_OK(c, response);
+    free(response);
+}
+
+/* POST /api/apn/config - 设置APN配置 */
+void handle_apn_config_set(struct mg_connection *c, struct mg_http_message *hm) {
+    HTTP_CHECK_POST(c, hm);
+    
+    /* 使用mg_json_get_long解析，默认值-1表示未提供 */
+    long mode = mg_json_get_long(hm->body, "$.mode", -1);
+    long template_id = mg_json_get_long(hm->body, "$.template_id", 0);
+    long auto_start = mg_json_get_long(hm->body, "$.auto_start", 0);
+    
+    /* mode必须提供 */
+    if (mode < 0) {
+        HTTP_ERROR(c, 400, "缺少mode参数");
+        return;
+    }
+    
+    if (apn_set_mode((int)mode, (int)template_id, (int)auto_start) == 0) {
+        HTTP_OK(c, "{\"status\":\"ok\",\"message\":\"配置保存成功\"}");
+    } else {
+        HTTP_ERROR(c, 400, "配置保存失败");
+    }
+}
+
+/* GET /api/apn/templates - 获取模板列表 */
+void handle_apn_templates_list(struct mg_connection *c, struct mg_http_message *hm) {
+    HTTP_CHECK_GET(c, hm);
+    
+    ApnTemplate templates[MAX_APN_TEMPLATES];
+    int count = apn_template_list(templates, MAX_APN_TEMPLATES);
+    
+    if (count < 0) {
+        HTTP_ERROR(c, 500, "获取模板列表失败");
+        return;
+    }
+    
+    /* 构建JSON响应 */
+    char *response = (char *)malloc(64 * 1024);
+    if (!response) {
+        HTTP_ERROR(c, 500, "内存分配失败");
+        return;
+    }
+    
+    char *p = response;
+    p += sprintf(p, "{\"status\":\"ok\",\"message\":\"\",\"data\":[");
+    
+    for (int i = 0; i < count; i++) {
+        char escaped_name[512];
+        char escaped_apn[512];
+        char escaped_username[512];
+        char escaped_password[512];
+        
+        json_escape_string(templates[i].name, escaped_name, sizeof(escaped_name));
+        json_escape_string(templates[i].apn, escaped_apn, sizeof(escaped_apn));
+        json_escape_string(templates[i].username, escaped_username, sizeof(escaped_username));
+        json_escape_string(templates[i].password, escaped_password, sizeof(escaped_password));
+        
+        p += sprintf(p, "%s{\"id\":%d,\"name\":\"%s\",\"apn\":\"%s\",\"protocol\":\"%s\","
+                     "\"username\":\"%s\",\"password\":\"%s\",\"auth_method\":\"%s\",\"created_at\":%ld}",
+                     i > 0 ? "," : "",
+                     templates[i].id, escaped_name, escaped_apn, templates[i].protocol,
+                     escaped_username, escaped_password, templates[i].auth_method,
+                     (long)templates[i].created_at);
+    }
+    
+    sprintf(p, "]}");
+    HTTP_OK(c, response);
+    free(response);
+}
+
+/* POST /api/apn/templates - 创建模板 */
+void handle_apn_templates_create(struct mg_connection *c, struct mg_http_message *hm) {
+    HTTP_CHECK_POST(c, hm);
+    
+    ApnTemplate tpl = {0};
+    
+    /* 解析JSON参数 */
+    char *name = mg_json_get_str(hm->body, "$.name");
+    char *apn = mg_json_get_str(hm->body, "$.apn");
+    char *protocol = mg_json_get_str(hm->body, "$.protocol");
+    char *username = mg_json_get_str(hm->body, "$.username");
+    char *password = mg_json_get_str(hm->body, "$.password");
+    char *auth_method = mg_json_get_str(hm->body, "$.auth_method");
+    
+    if (name) { strncpy(tpl.name, name, sizeof(tpl.name) - 1); free(name); }
+    if (apn) { strncpy(tpl.apn, apn, sizeof(tpl.apn) - 1); free(apn); }
+    if (protocol) { strncpy(tpl.protocol, protocol, sizeof(tpl.protocol) - 1); free(protocol); }
+    else { strcpy(tpl.protocol, "dual"); }
+    if (username) { strncpy(tpl.username, username, sizeof(tpl.username) - 1); free(username); }
+    if (password) { strncpy(tpl.password, password, sizeof(tpl.password) - 1); free(password); }
+    if (auth_method) { strncpy(tpl.auth_method, auth_method, sizeof(tpl.auth_method) - 1); free(auth_method); }
+    else { strcpy(tpl.auth_method, "chap"); }
+    
+    if (apn_template_create(tpl.name, tpl.apn, tpl.protocol, tpl.username, tpl.password, tpl.auth_method) == 0) {
+        HTTP_OK(c, "{\"status\":\"ok\",\"message\":\"模板创建成功\"}");
+    } else {
+        HTTP_ERROR(c, 400, "模板创建失败");
+    }
+}
+
+/* PUT /api/apn/templates/:id - 更新模板 */
+void handle_apn_templates_update(struct mg_connection *c, struct mg_http_message *hm) {
+    HTTP_CHECK_ANY(c, hm);
+    HTTP_HANDLE_OPTIONS(c, hm);
+    
+    if (!http_is_method(hm, "PUT")) {
+        http_method_error(c);
+        return;
+    }
+    
+    /* 从URL提取ID */
+    char id_str[16] = {0};
+    if (sscanf(hm->uri.buf, "/api/apn/templates/%15s", id_str) != 1) {
+        HTTP_ERROR(c, 400, "无效的模板ID");
+        return;
+    }
+    
+    ApnTemplate tpl = {0};
+    tpl.id = atoi(id_str);
+    
+    /* 解析JSON参数 */
+    char *name = mg_json_get_str(hm->body, "$.name");
+    char *apn = mg_json_get_str(hm->body, "$.apn");
+    char *protocol = mg_json_get_str(hm->body, "$.protocol");
+    char *username = mg_json_get_str(hm->body, "$.username");
+    char *password = mg_json_get_str(hm->body, "$.password");
+    char *auth_method = mg_json_get_str(hm->body, "$.auth_method");
+    
+    if (name) { strncpy(tpl.name, name, sizeof(tpl.name) - 1); free(name); }
+    if (apn) { strncpy(tpl.apn, apn, sizeof(tpl.apn) - 1); free(apn); }
+    if (protocol) { strncpy(tpl.protocol, protocol, sizeof(tpl.protocol) - 1); free(protocol); }
+    else { strcpy(tpl.protocol, "dual"); }
+    if (username) { strncpy(tpl.username, username, sizeof(tpl.username) - 1); free(username); }
+    if (password) { strncpy(tpl.password, password, sizeof(tpl.password) - 1); free(password); }
+    if (auth_method) { strncpy(tpl.auth_method, auth_method, sizeof(tpl.auth_method) - 1); free(auth_method); }
+    else { strcpy(tpl.auth_method, "chap"); }
+    
+    if (apn_template_update(tpl.id, tpl.name, tpl.apn, tpl.protocol, tpl.username, tpl.password, tpl.auth_method) == 0) {
+        HTTP_OK(c, "{\"status\":\"ok\",\"message\":\"模板更新成功\"}");
+    } else {
+        HTTP_ERROR(c, 400, "模板更新失败");
+    }
+}
+
+/* DELETE /api/apn/templates/:id - 删除模板 */
+void handle_apn_templates_delete(struct mg_connection *c, struct mg_http_message *hm) {
+    HTTP_CHECK_DELETE(c, hm);
+    
+    /* 从URL提取ID */
+    char id_str[16] = {0};
+    if (sscanf(hm->uri.buf, "/api/apn/templates/%15s", id_str) != 1) {
+        HTTP_ERROR(c, 400, "无效的模板ID");
+        return;
+    }
+    
+    int id = atoi(id_str);
+    
+    if (apn_template_delete(id) == 0) {
+        HTTP_OK(c, "{\"status\":\"ok\",\"message\":\"模板删除成功\"}");
+    } else {
+        HTTP_ERROR(c, 400, "模板删除失败");
+    }
+}
+
+/* POST /api/apn/apply - 应用模板 */
+void handle_apn_apply(struct mg_connection *c, struct mg_http_message *hm) {
+    HTTP_CHECK_POST(c, hm);
+    
+    /* 使用mg_json_get_long，默认值为-1表示未找到 */
+    long template_id = mg_json_get_long(hm->body, "$.template_id", -1);
+    
+    if (template_id <= 0) {
+        HTTP_ERROR(c, 400, "缺少或无效的template_id参数");
+        return;
+    }
+    
+    if (apn_apply_template((int)template_id) == 0) {
+        HTTP_OK(c, "{\"status\":\"ok\",\"message\":\"模板应用成功\"}");
+    } else {
+        HTTP_ERROR(c, 400, "模板应用失败");
+    }
+}
+
+/* POST /api/apn/clear - 清除APN配置 */
+void handle_apn_clear(struct mg_connection *c, struct mg_http_message *hm) {
+    HTTP_CHECK_POST(c, hm);
+    
+    if (apn_clear_all() == 0) {
+        HTTP_OK(c, "{\"status\":\"ok\",\"message\":\"APN配置已清除\"}");
+    } else {
+        HTTP_ERROR(c, 500, "清除APN配置失败");
+    }
 }
